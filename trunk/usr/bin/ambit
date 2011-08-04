@@ -1,1 +1,132 @@
-/Users/mm/svn/ambit/trunk/usr/bin/ambit
+#!/bin/bash
+
+# Name        :: ambit
+# Modified    :: 201100627
+# Copyright   :: 2010 Michael Marschall
+# Description :: Expand Host Sets OR Expand + Execute commands
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Just Who The Heck Am I?
+MyNameIs=$(basename $0)
+
+# Turn on RAD Opts
+shopt -s extglob
+
+# Load Configuration File and Function Library 
+source /etc/$MyNameIs/$MyNameIs.conf      || exit 1
+source /usr/lib/$MyNameIs/lib$MyNameIs.sh || exit 1
+
+# A Place for hosts, scripts and your favorite files
+AllFiles="/var/$MyNameIs"
+
+# Another Place for hosts, scripts and your favorite files
+UsrFiles="$HOME/.$MyNameIs"
+
+# System Wide Configuration File
+AllConf="/etc/$MyNameIs/$MyNameIs.conf"
+
+# User Specific Configuration File 
+UsrConf="$HOME/.$MyNameIs.conf"
+
+# Validate All Non-Builtins Used By Ambit
+TheCmds=(mkdir uniq sort sed cat touch host rm grep column \
+    head comm tail mv tr egrep logger)
+
+for UhCmd in ${!TheCmds[*]}
+do
+    Validate ${TheCmds[$UhCmd]} || Failed Can\'t Find command ${TheCmds[$UhCmd]}
+    eval "$(echo ${TheCmds[$UhCmd]})=$Results"
+done
+
+# If It Exists, Load User Specific Configuration File
+[ -f $UsrConf ] && source $UsrConf || echo "# $TimeStamp" > $UsrConf
+
+# Debug or Relative Silence?
+[ "$Debug" = "no"  ] && exec 2>/dev/null
+[ "$Debug" = "yes" ] && set -x
+
+# Set TmpDir and HostPath
+[ -d $HOME/tmp  ] && TmpDir=$HOME/tmp/.$MyNameIs || TmpDir=/tmp/.$MyNameIs-$USER
+
+# Make Sure Temp Dir Exists
+${mkdir} -p $TmpDir
+
+# Create/Check User Specific Data Location
+${mkdir} -p $UsrFiles/hosts
+
+# Set HostPath
+[ "$EUID" = "0" ] && HostPath="$AllFiles/hosts"  || HostPath="$UsrFiles/hosts"
+
+# If System Wide down List Exists, Clean and sort It 
+[ -f $HostPath/down ] && Create_DownHosts
+
+###################### [ Usage/Help and CLI Checks ] ###########################
+
+# Usage/Help Heredoc
+Usage=$(cat <<End-of-message
+Expand Host Groups OR Expand + Execute commands                    
+Usage:                                                             
+      $MyNameIs filename  - /path/to/file                          
+      $MyNameIs hostgroup - [user,global,dns] defined host set     
+      $MyNameIs string    - [arbitrary,expandable] host set string 
+      $MyNameIs command   - command with Ambit expandable string   
+
+   HostGroup Controls:                                  
+      $MyNameIs list hostgroups
+      $MyNameIs create hostgroup
+      $MyNameIs remove hostgroup [HostGroupName]
+      $MyNameIs edit hostgroup [HostGroupName]
+
+   Option Controls:
+      $MyNameIs list options
+      $MyNameIs edit option [OptionName]
+ 
+Example[s]:                                                        
+      $MyNameIs webservers
+      $MyNameIs /etc/hosts/devhosts
+      $MyNameIs sudo service [httpd,named,postfix] restart         
+      $MyNameIs edit hostgroup production
+
+End-of-message)
+
+# No Options or Help
+[ -z "$1" ] || [[ "$1" == +(--help|-h|help) ]] && echo "$Usage" && exit 2
+
+############################# [ Execution ] ####################################
+
+# HostGroup Controls
+[[ "$1" == +(cr|add|create)  && "$2" == +(hg|hgroup|hostgroup)    ]] \
+    && Create_Host_Group "$@"
+[[ "$1" == +(ls|show|list)   && "$2" == +(hgs|hgroups|hostgroups) ]] \
+    && List_Host_Group   "$@"
+[[ "$1" == +(ed|change|edit) && "$2" == +(hg|hgroup|hostgroup)    ]] \
+    && Edit_Host_Group   "$@"
+[[ "$1" == +(rm|del|remove)  && "$2" == +(hg|hgroup|hostgroup)    ]] \
+    && Remove_Host_Group "$@"
+
+# Option Control
+[[ "$1" == +(ls|show|list)   && "$2" == +(opts|options) ]] && List_Options "$@"
+[[ "$1" == +(ed|change|edit) && "$2" == +(opt|option)   ]] && Edit_Options "$@"
+
+# Determine If Ambit Is Expanding A HostGroup Or A command
+Host_Group_Or_Command "$@"
+
+# Massage HostGroup or command String To Make Ambit Work From Scripts or CLI
+TheString=$(BracketToBrace $TheString)
+
+# Expand HostGroup[s] or commands 
+FullList=$(Expansion_Loop | LC_ALL=C ${sort} | ${uniq}) \
+    && ${comm} -23 <(echo "$FullList") <(echo "$DownHosts") \
+    || Failed Ambit Had Issues Generating A List
