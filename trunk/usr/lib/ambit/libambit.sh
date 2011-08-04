@@ -1,0 +1,1 @@
+/Users/mm/svn/ambit/trunk/usr/lib/ambit/libambit.sh
